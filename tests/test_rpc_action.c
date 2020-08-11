@@ -155,7 +155,7 @@ rpc_fail_cb(sr_session_ctx_t *session, const char *xpath, const struct lyd_node 
     assert_string_equal(xpath, "/ops:rpc1");
 
     /* check input data tree */
-    ret = lyd_print_mem(&str1, input, LYD_XML, LYP_WITHSIBLINGS);
+    ret = lyd_print_mem(&str1, input, LYD_XML, LYD_PRINT_WITHSIBLINGS);
     assert_int_equal(ret, 0);
 
     str2 = "<rpc1 xmlns=\"urn:ops\"></rpc1>";
@@ -182,12 +182,11 @@ test_fail(void **state)
     assert_int_equal(ret, SR_ERR_OK);
 
     /* send RPC */
-    input = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc1", NULL, 0, 0);
-    assert_non_null(input);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc1", NULL, 0, &input));
 
     /* expect an error */
     ret = sr_rpc_send_tree(st->sess, input, 0, &output);
-    lyd_free_withsiblings(input);
+    lyd_free_all(input);
     assert_int_equal(ret, SR_ERR_CALLBACK_FAILED);
     ret = sr_get_error(st->sess, &err_info);
     assert_int_equal(ret, SR_ERR_OK);
@@ -197,12 +196,11 @@ test_fail(void **state)
     assert_null(output);
 
     /* try to send an action */
-    input = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='1']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='1']/cont2/act1", NULL,
+            0, 0, NULL, &input));
 
     ret = sr_rpc_send_tree(st->sess, input, 0, &output);
-    for (; input->parent; input = input->parent);
-    lyd_free_withsiblings(input);
+    lyd_free_all(input);
     assert_int_equal(ret, SR_ERR_VALIDATION_FAILED);
 
     sr_unsubscribe(subscr);
@@ -405,7 +403,7 @@ rpc_action_cb(sr_session_ctx_t *session, const char *op_path, const struct lyd_n
     struct lyd_node *node;
     char *str1;
     const char *str2;
-    int ret;
+    LY_ERR ret;
 
     (void)session;
     (void)event;
@@ -414,26 +412,24 @@ rpc_action_cb(sr_session_ctx_t *session, const char *op_path, const struct lyd_n
 
     if (!strcmp(op_path, "/ops:cont/list1/cont2/act1")) {
         /* check input data */
-        ret = lyd_print_mem(&str1, input, LYD_XML, LYP_WITHSIBLINGS);
-        assert_int_equal(ret, 0);
+        ret = lyd_print_mem(&str1, input, LYD_XML, LYD_PRINT_WITHSIBLINGS);
+        assert_int_equal(ret, LY_SUCCESS);
         str2 = "<act1 xmlns=\"urn:ops\"><l6>val</l6><l7>val</l7></act1>";
         assert_string_equal(str1, str2);
         free(str1);
 
         /* create output data */
-        node = lyd_new_path(output, NULL, "l9", "l12-val", 0, LYD_PATH_OPT_OUTPUT);
-        assert_non_null(node);
+        assert_int_equal(LY_SUCCESS, lyd_new_path(output, NULL, "l9", "l12-val", LYD_NEWOPT_OUTPUT, &node));
     } else if (!strcmp(op_path, "/ops:cont/list1/act2")) {
         /* check input data */
-        ret = lyd_print_mem(&str1, input, LYD_XML, LYP_WITHSIBLINGS);
-        assert_int_equal(ret, 0);
+        ret = lyd_print_mem(&str1, input, LYD_XML, LYD_PRINT_WITHSIBLINGS);
+        assert_int_equal(ret, LY_SUCCESS);
         str2 = "<act2 xmlns=\"urn:ops\"><l10>e3</l10></act2>";
         assert_string_equal(str1, str2);
         free(str1);
 
         /* create output data */
-        node = lyd_new_path(output, NULL, "l11", "-65536", 0, LYD_PATH_OPT_OUTPUT);
-        assert_non_null(node);
+        assert_int_equal(LY_SUCCESS, lyd_new_path(output, NULL, "l11", "-65536", LYD_NEWOPT_OUTPUT, &node));
     } else {
         fail();
     }
@@ -446,7 +442,7 @@ test_action(void **state)
 {
     struct state *st = (struct state *)*state;
     sr_subscription_ctx_t *subscr;
-    struct lyd_node *node, *input_op, *output_op;
+    struct lyd_node *input_op, *output_op;
     char *str1;
     const char *str2;
     int ret;
@@ -472,24 +468,21 @@ test_action(void **state)
     /*
      * create first action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
     assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l6", "val", 0, 0);
-    assert_non_null(node);
-    node = lyd_new_path(input_op, NULL, "l7", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l6", "val", 0, NULL));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l7", "val", 0, NULL));
 
     /* send first action */
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
     assert_int_equal(ret, SR_ERR_OK);
 
     /* check output data tree */
     assert_non_null(output_op);
-    ret = lyd_print_mem(&str1, output_op, LYD_XML, LYP_WITHSIBLINGS);
-    for (; output_op->parent; output_op = output_op->parent);
-    lyd_free_withsiblings(output_op);
+    ret = lyd_print_mem(&str1, output_op, LYD_XML, LYD_PRINT_WITHSIBLINGS);
+    lyd_free_all(output_op);
     assert_int_equal(ret, 0);
     str2 = "<act1 xmlns=\"urn:ops\"><l9>l12-val</l9></act1>";
     assert_string_equal(str1, str2);
@@ -498,22 +491,19 @@ test_action(void **state)
     /*
      * create second action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/act2", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l10", "e3", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/act2", NULL, 0,
+            0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l10", "e3", 0, NULL));
 
     /* send second action */
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
     assert_int_equal(ret, SR_ERR_OK);
 
     /* check output data tree */
     assert_non_null(output_op);
-    ret = lyd_print_mem(&str1, output_op, LYD_XML, LYP_WITHSIBLINGS);
-    for (; output_op->parent; output_op = output_op->parent);
-    lyd_free_withsiblings(output_op);
+    ret = lyd_print_mem(&str1, output_op, LYD_XML, LYD_PRINT_WITHSIBLINGS);
+    lyd_free_all(output_op);
     assert_int_equal(ret, 0);
     str2 = "<act2 xmlns=\"urn:ops\"><l11>-65536</l11></act2>";
     assert_string_equal(str1, str2);
@@ -529,7 +519,7 @@ rpc_action_pred_cb(sr_session_ctx_t *session, const char *op_path, const struct 
 {
     char *str1;
     const char *str2;
-    int ret;
+    LY_ERR ret;
 
     (void)session;
     (void)event;
@@ -539,14 +529,14 @@ rpc_action_pred_cb(sr_session_ctx_t *session, const char *op_path, const struct 
 
     if (!strcmp(op_path, "/ops:cont/list1[k='one' or k='two']/cont2/act1")) {
         /* check input data */
-        ret = lyd_print_mem(&str1, input, LYD_XML, LYP_WITHSIBLINGS);
+        ret = lyd_print_mem(&str1, input, LYD_XML, LYD_PRINT_WITHSIBLINGS);
         assert_int_equal(ret, 0);
         str2 = "<act1 xmlns=\"urn:ops\"><l6>val2</l6><l7>val2</l7></act1>";
         assert_string_equal(str1, str2);
         free(str1);
     } else if (!strcmp(op_path, "/ops:cont/list1[k='three' or k='four']/cont2/act1")) {
         /* check input data */
-        ret = lyd_print_mem(&str1, input, LYD_XML, LYP_WITHSIBLINGS);
+        ret = lyd_print_mem(&str1, input, LYD_XML, LYD_PRINT_WITHSIBLINGS);
         assert_int_equal(ret, 0);
         str2 = "<act1 xmlns=\"urn:ops\"><l6>val3</l6><l7>val3</l7></act1>";
         assert_string_equal(str1, str2);
@@ -563,7 +553,7 @@ test_action_pred(void **state)
 {
     struct state *st = (struct state *)*state;
     sr_subscription_ctx_t *subscr;
-    struct lyd_node *node, *input_op, *output_op;
+    struct lyd_node *input_op, *output_op;
     int ret;
 
     /* you cannot subscribe to more actions */
@@ -598,54 +588,43 @@ test_action_pred(void **state)
     /*
      * create first action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='zero']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l6", "val", 0, 0);
-    assert_non_null(node);
-    node = lyd_new_path(input_op, NULL, "l7", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='zero']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l6", "val", 0, NULL));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l7", "val", 0, NULL));
 
     /* send action, fails */
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
     assert_int_equal(ret, SR_ERR_UNSUPPORTED);
 
     /*
      * create second action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='one']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l6", "val2", 0, 0);
-    assert_non_null(node);
-    node = lyd_new_path(input_op, NULL, "l7", "val2", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='one']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l6", "val2", 0, NULL));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l7", "val2", 0, NULL));
 
     /* send action, should be fine */
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
-    for (; output_op->parent; output_op = output_op->parent);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     assert_int_equal(ret, SR_ERR_OK);
 
     /*
      * create third action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='three']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l6", "val3", 0, 0);
-    assert_non_null(node);
-    node = lyd_new_path(input_op, NULL, "l7", "val3", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='three']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l6", "val3", 0, NULL));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l7", "val3", 0, NULL));
 
     /* send action, should be fine */
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
-    for (; output_op->parent; output_op = output_op->parent);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     assert_int_equal(ret, SR_ERR_OK);
 
@@ -675,7 +654,7 @@ test_multi(void **state)
 {
     struct state *st = (struct state *)*state;
     sr_subscription_ctx_t *subscr;
-    struct lyd_node *node, *input_op, *output_op;
+    struct lyd_node *input_op, *output_op;
     int ret;
 
     /* subscribe */
@@ -709,20 +688,16 @@ test_multi(void **state)
     /*
      * create first action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='zero']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l6", "val", 0, 0);
-    assert_non_null(node);
-    node = lyd_new_path(input_op, NULL, "l7", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='zero']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l6", "val", 0, NULL));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l7", "val", 0, NULL));
 
     /* send action */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
-    for (; output_op->parent; output_op = output_op->parent);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     assert_int_equal(ret, SR_ERR_OK);
     assert_int_equal(st->cb_called, 1);
@@ -730,20 +705,16 @@ test_multi(void **state)
     /*
      * create second action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='one']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l6", "val2", 0, 0);
-    assert_non_null(node);
-    node = lyd_new_path(input_op, NULL, "l7", "val2", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='one']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l6", "val2", 0, NULL));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l7", "val2", 0, NULL));
 
     /* send action */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
-    for (; output_op->parent; output_op = output_op->parent);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     assert_int_equal(ret, SR_ERR_OK);
     assert_int_equal(st->cb_called, 2);
@@ -751,20 +722,16 @@ test_multi(void **state)
     /*
      * create third action
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='two']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l6", "val3", 0, 0);
-    assert_non_null(node);
-    node = lyd_new_path(input_op, NULL, "l7", "val3", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='two']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l6", "val3", 0, NULL));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l7", "val3", 0, NULL));
 
     /* send action */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
-    for (; output_op->parent; output_op = output_op->parent);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     assert_int_equal(ret, SR_ERR_OK);
     assert_int_equal(st->cb_called, 3);
@@ -778,7 +745,6 @@ rpc_multi_fail0_cb(sr_session_ctx_t *session, const char *op_path, const struct 
         uint32_t request_id, struct lyd_node *output, void *private_data)
 {
     struct state *st = (struct state *)private_data;
-    struct lyd_node *node;
     static int call_no = 1;
     int ret = SR_ERR_OK;
 
@@ -790,8 +756,7 @@ rpc_multi_fail0_cb(sr_session_ctx_t *session, const char *op_path, const struct 
     ++st->cb_called;
 
     /* create output data in all cases, it should always be freed */
-    node = lyd_new_path(output, NULL, "l5", "0", 0, LYD_PATH_OPT_OUTPUT);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(output, NULL, "l5", "0", LYD_NEWOPT_OUTPUT, NULL));
 
     switch (call_no) {
     case 1:
@@ -818,7 +783,6 @@ rpc_multi_fail1_cb(sr_session_ctx_t *session, const char *op_path, const struct 
         uint32_t request_id, struct lyd_node *output, void *private_data)
 {
     struct state *st = (struct state *)private_data;
-    struct lyd_node *node;
     static int call_no = 1;
     int ret = SR_ERR_OK;
 
@@ -830,8 +794,7 @@ rpc_multi_fail1_cb(sr_session_ctx_t *session, const char *op_path, const struct 
     ++st->cb_called;
 
     /* create output data in all cases, it should always be freed */
-    node = lyd_new_path(output, NULL, "l5", "1", 0, LYD_PATH_OPT_OUTPUT);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(output, NULL, "l5", "1", LYD_NEWOPT_OUTPUT, NULL));
 
     switch (call_no) {
     case 1:
@@ -869,7 +832,6 @@ rpc_multi_fail2_cb(sr_session_ctx_t *session, const char *op_path, const struct 
         uint32_t request_id, struct lyd_node *output, void *private_data)
 {
     struct state *st = (struct state *)private_data;
-    struct lyd_node *node;
     static int call_no = 1;
     int ret = SR_ERR_OK;
 
@@ -881,8 +843,7 @@ rpc_multi_fail2_cb(sr_session_ctx_t *session, const char *op_path, const struct 
     ++st->cb_called;
 
     /* create output data in all cases, it should always be freed */
-    node = lyd_new_path(output, NULL, "l5", "2", 0, LYD_PATH_OPT_OUTPUT);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(output, NULL, "l5", "2", LYD_NEWOPT_OUTPUT, NULL));
 
     switch (call_no) {
     case 1:
@@ -929,7 +890,7 @@ test_multi_fail(void **state)
 {
     struct state *st = (struct state *)*state;
     sr_subscription_ctx_t *subscr;
-    struct lyd_node *node, *input_op, *output_op;
+    struct lyd_node *input_op, *output_op;
     int ret;
 
     /* subscribe */
@@ -943,16 +904,14 @@ test_multi_fail(void **state)
     /*
      * create first RPC
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l4", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l4", "val", 0, NULL));
 
     /* send RPC */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    lyd_free_withsiblings(input_op);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     pthread_barrier_wait(&st->barrier);
 
@@ -963,16 +922,14 @@ test_multi_fail(void **state)
     /*
      * create second RPC
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l4", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l4", "val", 0, NULL));
 
     /* send RPC */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    lyd_free_withsiblings(input_op);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     pthread_barrier_wait(&st->barrier);
 
@@ -983,16 +940,14 @@ test_multi_fail(void **state)
     /*
      * create third RPC
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l4", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l4", "val", 0, NULL));
 
     /* send RPC */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    lyd_free_withsiblings(input_op);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     /* it should fail with 1 total callback calls */
     assert_int_equal(ret, SR_ERR_CALLBACK_FAILED);
@@ -1001,24 +956,22 @@ test_multi_fail(void **state)
     /*
      * create fourth RPC
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l4", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l4", "val", 0, NULL));
 
     /* send RPC */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
 
     /* it should not fail */
     assert_int_equal(ret, SR_ERR_OK);
     assert_int_equal(st->cb_called, 3);
 
     /* check output */
-    assert_string_equal(output_op->child->schema->name, "l5");
-    assert_int_equal(((struct lyd_node_leaf_list *)output_op->child)->value.uint16, 0);
-    lyd_free_withsiblings(output_op);
+    assert_string_equal(lyd_node_children(output_op, 0)->schema->name, "l5");
+    assert_int_equal(((struct lyd_node_term *)lyd_node_children(output_op, 0))->value.uint16, 0);
+    lyd_free_all(output_op);
 
     sr_unsubscribe(subscr);
 }
@@ -1029,7 +982,6 @@ rpc_unlocked_cb(sr_session_ctx_t *session, const char *op_path, const struct lyd
         uint32_t request_id, struct lyd_node *output, void *private_data)
 {
     struct state *st = (struct state *)private_data;
-    struct lyd_node *node;
     sr_subscription_ctx_t *tmp;
     int ret;
     static int call_no = 1;
@@ -1042,8 +994,7 @@ rpc_unlocked_cb(sr_session_ctx_t *session, const char *op_path, const struct lyd
     ++st->cb_called;
 
     /* create some output data */
-    node = lyd_new_path(output, NULL, "l5", "0", 0, LYD_PATH_OPT_OUTPUT);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(output, NULL, "l5", "0", LYD_NEWOPT_OUTPUT, NULL));
 
     switch (call_no) {
     case 1:
@@ -1066,7 +1017,7 @@ test_unlocked(void **state)
 {
     struct state *st = (struct state *)*state;
     sr_subscription_ctx_t *subscr;
-    struct lyd_node *node, *input_op, *output_op;
+    struct lyd_node *input_op, *output_op;
     int ret;
 
     /* subscribe with unlocked flag */
@@ -1076,16 +1027,14 @@ test_unlocked(void **state)
     /*
      * create first RPC
      */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
-    node = lyd_new_path(input_op, NULL, "l4", "val", 0, 0);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:rpc3", NULL, 0, 0, NULL, &input_op));
+    assert_int_equal(LY_SUCCESS, lyd_new_path(input_op, NULL, "l4", "val", 0, NULL));
 
     /* send RPC */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    lyd_free_withsiblings(input_op);
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(input_op);
+    lyd_free_all(output_op);
 
     assert_int_equal(st->cb_called, 1);
     assert_int_equal(ret, SR_ERR_OK);
@@ -1127,9 +1076,8 @@ test_action_deps(void **state)
     assert_int_equal(ret, SR_ERR_OK);
 
     /* create the action */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/act:advanced/act3:conditional/conditional_action",
-            NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/act:advanced/act3:conditional/"
+            "conditional_action", NULL, 0, 0, NULL, &input_op));
 
     /* send action, its parent does not exist so it should fail */
     st->cb_called = 0;
@@ -1154,36 +1102,21 @@ test_action_deps(void **state)
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
     assert_int_equal(ret, SR_ERR_OK);
-    while (output_op->parent) {
-        output_op = output_op->parent;
-    }
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(output_op);
     assert_int_equal(st->cb_called, 1);
-
-    while (input_op->parent) {
-        input_op = input_op->parent;
-    }
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
 
     /* create another action */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/act:advanced/act3:conditional_action2",
-            NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/act:advanced/act3:conditional_action2",
+            NULL, 0, 0, NULL, &input_op));
 
     /* send the action, should succeed */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
     assert_int_equal(ret, SR_ERR_OK);
-    while (output_op->parent) {
-        output_op = output_op->parent;
-    }
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(output_op);
     assert_int_equal(st->cb_called, 1);
-
-    while (input_op->parent) {
-        input_op = input_op->parent;
-    }
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
 
     sr_unsubscribe(subscr);
 }
@@ -1245,36 +1178,29 @@ test_action_change_config(void **state)
     assert_int_equal(ret, SR_ERR_OK);
 
     /* create the action */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='val']/cont2/act1",
-            NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='val']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
 
     /* send the action */
     st->cb_called = 0;
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    while (output_op->parent) {
-        output_op = output_op->parent;
-    }
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(output_op);
 
     assert_int_equal(st->cb_called, 1);
     assert_int_equal(ret, SR_ERR_OK);
 
-    while (input_op->parent) {
-        input_op = input_op->parent;
-    }
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
 
     /* check that the data were changed */
     ret = sr_get_data(st->sess, "/ops:cont", 0, 0, 0, &data);
     assert_int_equal(ret, SR_ERR_OK);
 
-    assert_string_equal(data->child->schema->name, "cont3");
-    assert_string_equal(data->child->next->schema->name, "list1");
-    assert_string_equal(((struct lyd_node_leaf_list *)data->child->next->child)->value_str, "val");
-    assert_string_equal(data->child->next->next->schema->name, "list1");
-    assert_string_equal(((struct lyd_node_leaf_list *)data->child->next->next->child)->value_str, "val2");
-    lyd_free_withsiblings(data);
+    assert_string_equal(LYD_CHILD(data)->schema->name, "cont3");
+    assert_string_equal(LYD_CHILD(data)->next->schema->name, "list1");
+    assert_string_equal(((struct lyd_node_term *)LYD_CHILD(LYD_CHILD(data)->next))->value.canonical_cache, "val");
+    assert_string_equal(LYD_CHILD(data)->next->next->schema->name, "list1");
+    assert_string_equal(((struct lyd_node_term *)LYD_CHILD(LYD_CHILD(data)->next->next))->value.canonical_cache, "val2");
+    lyd_free_all(data);
 
     sr_unsubscribe(subscr1);
     sr_unsubscribe(subscr2);
@@ -1286,7 +1212,6 @@ rpc_shelve_cb(sr_session_ctx_t *session, const char *op_path, const struct lyd_n
         uint32_t request_id, struct lyd_node *output, void *private_data)
 {
     struct state *st = (struct state *)private_data;
-    struct lyd_node *node;
 
     (void)session;
     (void)op_path;
@@ -1301,8 +1226,7 @@ rpc_shelve_cb(sr_session_ctx_t *session, const char *op_path, const struct lyd_n
     }
 
     /* create output data */
-    node = lyd_new_path(output, NULL, "l5", "256", 0, LYD_PATH_OPT_OUTPUT);
-    assert_non_null(node);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(output, NULL, "l5", "256", LYD_NEWOPT_OUTPUT, NULL));
 
     return SR_ERR_OK;
 }
@@ -1317,27 +1241,20 @@ send_rpc_shelve_thread(void *arg)
     st->cb_called = 0;
 
     /* create the RPC */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc3/l4", "vall", 0, 0);
-    assert_non_null(input_op);
+    assert_int_equal(LY_SUCCESS, lyd_new_path(NULL, sr_get_context(st->conn), "/ops:rpc3/l4", "vall", 0, &input_op));
 
     /* wait for subscription before sending the RPC */
     pthread_barrier_wait(&st->barrier);
 
     /* send the RPC */
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
-    while (input_op->parent) {
-        input_op = input_op->parent;
-    }
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
     assert_int_equal(ret, SR_ERR_OK);
 
     /* check output */
     /* TODO */
 
-    while (output_op->parent) {
-        output_op = output_op->parent;
-    }
-    lyd_free_withsiblings(output_op);
+    lyd_free_all(output_op);
 
     /* signal that we are done */
     pthread_barrier_wait(&st->barrier);
@@ -1443,24 +1360,22 @@ test_input_parameters(void **state)
     assert_int_equal(ret, SR_ERR_INVAL_ARG);
 
     /* data tree must be created with the session connection libyang context */
-    struct ly_ctx *ctx = ly_ctx_new(TESTS_DIR"/files/", 0);
-    assert_non_null(ctx);
-    const struct lys_module *mod = lys_parse_path(ctx, TESTS_DIR"/files/simple.yang", LYS_IN_YANG);
-    assert_non_null(mod);
-    input_op = lyd_new_path(NULL, ctx, "/simple:ac1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
+    struct ly_ctx *ctx;
+    const struct lys_module *mod;
+    assert_int_equal(LY_SUCCESS, ly_ctx_new(TESTS_DIR"/files/", 0, &ctx));
+    assert_int_equal(LY_SUCCESS, lys_parse_path(ctx, TESTS_DIR"/files/simple.yang", LYS_IN_YANG, &mod));
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, ctx, "/simple:ac1", NULL, 0, 0, NULL, &input_op));
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
     assert_int_equal(ret, SR_ERR_INVAL_ARG);
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
     ly_ctx_destroy(ctx, NULL);
 
     /* data tree not a valid RPC or action */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/cont2", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/cont2", NULL,
+            0, 0, NULL, &input_op));
     ret = sr_rpc_send_tree(st->sess, input_op, 0, &output_op);
     assert_int_equal(ret, SR_ERR_INVAL_ARG);
-    for(; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
 }
 
 /* TEST */
@@ -1535,8 +1450,8 @@ test_rpc_action_with_no_thread(void **state)
     assert_int_equal(ret, SR_ERR_OK);
 
     /* create first action */
-    input_op = lyd_new_path(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/cont2/act1", NULL, 0, LYD_PATH_OPT_NOPARENTRET);
-    assert_non_null(input_op);
+    assert_int_equal(LY_SUCCESS, lyd_new_path2(NULL, sr_get_context(st->conn), "/ops:cont/list1[k='key']/cont2/act1",
+            NULL, 0, 0, NULL, &input_op));
 
     /* send first action */
     ret = sr_rpc_send_tree(st->sess, input_op, 50, &output_op);
@@ -1544,8 +1459,7 @@ test_rpc_action_with_no_thread(void **state)
 
     /* process events on action subscriptions when the flag is SR_SUBSCR_NO_THREAD */
     ret = sr_process_events(subscr2, st->sess, 0);
-    for (; input_op->parent; input_op = input_op->parent);
-    lyd_free_withsiblings(input_op);
+    lyd_free_all(input_op);
     assert_int_equal(ret, SR_ERR_OK);
 
     sr_unsubscribe(subscr2);

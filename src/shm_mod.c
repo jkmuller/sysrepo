@@ -131,18 +131,19 @@ sr_shmmod_modinfo_collect_edit(struct sr_mod_info_s *mod_info, const struct lyd_
 
     /* add all the modules from the edit into our array */
     mod = NULL;
-    LY_TREE_FOR(edit, root) {
-        if (lyd_node_module(root) == mod) {
+    LY_LIST_FOR(edit, root) {
+        if (lyd_owner_module(root) == mod) {
             continue;
-        } else if (!strcmp(lyd_node_module(root)->name, SR_YANG_MOD)) {
-            str = lyd_path(root);
-            sr_errinfo_new(&err_info, SR_ERR_UNSUPPORTED, str, "Data of internal module \"%s\" cannot be modified.", SR_YANG_MOD);
+        } else if (!strcmp(lyd_owner_module(root)->name, SR_YANG_MOD)) {
+            str = lyd_path(root, LYD_PATH_LOG, NULL, 0);
+            sr_errinfo_new(&err_info, SR_ERR_UNSUPPORTED, str, "Data of internal module \"%s\" cannot be modified.",
+                    SR_YANG_MOD);
             free(str);
             return err_info;
         }
 
         /* remember last mod, good chance it will also be the module of some next data nodes */
-        mod = lyd_node_module(root);
+        mod = lyd_owner_module(root);
 
         /* find the module in SHM and add it with any dependencies */
         shm_mod = sr_shmmain_find_module(&mod_info->conn->main_shm, mod_info->conn->ext_shm.addr, mod->name, 0);
@@ -165,7 +166,7 @@ sr_shmmod_modinfo_collect_xpath(struct sr_mod_info_s *mod_info, const char *xpat
     sr_mod_t *shm_mod;
     char *module_name;
     const struct lys_module *ly_mod;
-    const struct lys_node *ctx_node;
+    const struct lysc_node *ctx_node, *snode;
     struct ly_set *set = NULL;
     uint32_t i;
 
@@ -177,7 +178,7 @@ sr_shmmod_modinfo_collect_xpath(struct sr_mod_info_s *mod_info, const char *xpat
         SR_CHECK_MEM_RET(!module_name, err_info);
     }
 
-    ly_mod = ly_ctx_get_module(mod_info->conn->ly_ctx, module_name, NULL, 1);
+    ly_mod = ly_ctx_get_module_implemented(mod_info->conn->ly_ctx, module_name);
     if (!ly_mod) {
         sr_errinfo_new(&err_info, SR_ERR_INVAL_ARG, NULL, "Module \"%s\" was not found in sysrepo.", module_name);
         free(module_name);
@@ -186,32 +187,33 @@ sr_shmmod_modinfo_collect_xpath(struct sr_mod_info_s *mod_info, const char *xpat
     free(module_name);
 
     /* take any valid node */
-    ctx_node = lys_getnext(NULL, NULL, ly_mod, 0);
+    ctx_node = lys_getnext(NULL, NULL, ly_mod->compiled, 0);
     if (!ctx_node) {
         sr_errinfo_new(&err_info, SR_ERR_INVAL_ARG, NULL, "No data in module \"%s\".", ly_mod->name);
         return err_info;
     }
 
-    set = lys_xpath_atomize(ctx_node, LYXP_NODE_ELEM, xpath, 0);
-    if (!set) {
+    if (lys_atomize_xpath(ctx_node, xpath, 0, &set)) {
         sr_errinfo_new_ly(&err_info, mod_info->conn->ly_ctx);
         return err_info;
     }
 
     /* add all the other modules */
     ly_mod = NULL;
-    for (i = 0; i < set->number; ++i) {
+    for (i = 0; i < set->count; ++i) {
+        snode = set->snodes[i];
+
         /* skip uninteresting nodes */
-        if ((set->set.s[i]->nodetype & (LYS_RPC | LYS_NOTIF))
-                || ((set->set.s[i]->flags & LYS_CONFIG_R) && SR_IS_CONVENTIONAL_DS(mod_info->ds))) {
+        if ((snode->nodetype & (LYS_RPC | LYS_NOTIF))
+                || ((snode->flags & LYS_CONFIG_R) && SR_IS_CONVENTIONAL_DS(mod_info->ds))) {
             continue;
         }
 
-        if (lys_node_module(set->set.s[i]) == ly_mod) {
+        if (snode->module == ly_mod) {
             /* skip already-added modules */
             continue;
         }
-        ly_mod = lys_node_module(set->set.s[i]);
+        ly_mod = snode->module;
 
         if (!ly_mod->implemented || !strcmp(ly_mod->name, SR_YANG_MOD) || !strcmp(ly_mod->name, "ietf-netconf")) {
             /* skip import-only modules, the internal sysrepo module, and ietf-netconf (as it has no data, only in libyang) */
@@ -232,7 +234,7 @@ sr_shmmod_modinfo_collect_xpath(struct sr_mod_info_s *mod_info, const char *xpat
     /* success */
 
 cleanup:
-    ly_set_free(set);
+    ly_set_free(set, NULL);
     return err_info;
 }
 
@@ -257,7 +259,7 @@ sr_shmmod_modinfo_collect_modules(struct sr_mod_info_s *mod_info, const struct l
 
     /* all modules */
     SR_SHM_MOD_FOR(conn->main_shm.addr, conn->main_shm.size, shm_mod) {
-        ly_mod = ly_ctx_get_module(conn->ly_ctx, conn->ext_shm.addr + shm_mod->name, NULL, 1);
+        ly_mod = ly_ctx_get_module_implemented(conn->ly_ctx, conn->ext_shm.addr + shm_mod->name);
         SR_CHECK_INT_RET(!ly_mod, err_info);
 
         /* do not collect dependencies, all the modules are added anyway */
@@ -280,19 +282,19 @@ sr_shmmod_modinfo_collect_op(struct sr_mod_info_s *mod_info, const char *op_path
     sr_mod_t *shm_mod, *dep_mod;
     sr_mod_op_dep_t *shm_op_deps;
     const struct lys_module *ly_mod;
-    const struct lys_node *top;
+    const struct lysc_node *top;
     uint16_t i;
 
     /* find top-level node in case of action/nested notification */
-    for (top = op->schema; lys_parent(top); top = lys_parent(top));
+    for (top = op->schema; top->parent; top = top->parent);
 
     /* find the module in SHM */
-    shm_mod = sr_shmmain_find_module(&conn->main_shm, conn->ext_shm.addr, lys_node_module(top)->name, 0);
+    shm_mod = sr_shmmain_find_module(&conn->main_shm, conn->ext_shm.addr, top->module->name, 0);
     SR_CHECK_INT_RET(!shm_mod, err_info);
 
     /* if this is a nested action/notification, we will also need this module's data for checking its data parent exists */
-    if (!output && lys_parent(op->schema)) {
-        if ((err_info = sr_modinfo_add_mod(shm_mod, lys_node_module(top), MOD_INFO_REQ, 0, mod_info))) {
+    if (!output && op->schema->parent) {
+        if ((err_info = sr_modinfo_add_mod(shm_mod, top->module, MOD_INFO_REQ, 0, mod_info))) {
             return err_info;
         }
     }
@@ -320,7 +322,7 @@ sr_shmmod_modinfo_collect_op(struct sr_mod_info_s *mod_info, const char *op_path
         SR_CHECK_INT_RET(!dep_mod, err_info);
 
         /* find ly module */
-        ly_mod = ly_ctx_get_module(conn->ly_ctx, conn->ext_shm.addr + dep_mod->name, NULL, 1);
+        ly_mod = ly_ctx_get_module_implemented(conn->ly_ctx, conn->ext_shm.addr + dep_mod->name);
         SR_CHECK_INT_RET(!ly_mod, err_info);
 
         /* add dependency */
@@ -1047,7 +1049,7 @@ sr_shmmod_oper_stored_del_conn(sr_conn_ctx_t *conn, sr_conn_ctx_t *del_conn, pid
             if ((err_info = sr_module_file_data_set(mod->ly_mod->name, SR_DS_OPERATIONAL, diff, 0, 0))) {
                 goto cleanup;
             }
-            lyd_free_withsiblings(diff);
+            lyd_free_all(diff);
             diff = NULL;
         }
     }
@@ -1057,7 +1059,7 @@ cleanup:
     sr_shmmod_modinfo_unlock(&mod_info, 0);
 
     free(path);
-    lyd_free_withsiblings(diff);
+    lyd_free_all(diff);
     sr_modinfo_free(&mod_info);
     return err_info;
 }

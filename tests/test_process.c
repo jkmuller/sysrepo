@@ -274,14 +274,13 @@ test_rpc_crash1(int rp, int wp)
     /* wait for the other process */
     barrier(rp, wp);
 
-    rpc = lyd_new_path(NULL, sr_get_context(conn), "/ops:rpc3/l4", "value", 0, 0);
-    sr_assert_true(rpc);
+    sr_assert_int_equal(LY_SUCCESS, lyd_new_path(NULL, sr_get_context(conn), "/ops:rpc3/l4", "value", 0, &rpc));
 
     /* this should crash the other process */
     ret = sr_rpc_send_tree(sess, rpc, 100, &output);
     sr_assert_int_equal(ret, SR_ERR_CALLBACK_FAILED);
 
-    lyd_free(rpc);
+    lyd_free_tree(rpc);
     sr_disconnect(conn);
     return 0;
 }
